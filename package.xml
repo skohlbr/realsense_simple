@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>realsense_simple</name>
+  <version>0.0.0</version>
+  <description>Because the real-sense ros driver is garbage</description>
+
+  <maintainer email="ztaylor@ethz.ch">Zachary Taylor</maintainer>
+  
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>catkin_simple</buildtool_depend>
+
+  <depend>librealsense</depend>
+  <depend>pcl_ros</depend>
+  <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
+
+</package>

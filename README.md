@@ -11,3 +11,5 @@ Disadvantages of this driver
 Advantages
 - some outlier filtering and downsampling
 - can be easier to get up and running with on some systems
+
+The ros node depends on [librealsense](https://github.com/IntelRealSense/librealsense) and was based on the cpp_pointcloud example.
