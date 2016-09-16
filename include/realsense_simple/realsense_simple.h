@@ -11,8 +11,11 @@ class Realsense {
   void shutdown();
 
  private:
-  struct color {
+  struct rgb_color {
     uint8_t r, g, b;
+  };
+  struct hsv_color {
+    uint8_t h, s, v;
   };
 
   template <typename DataType>
@@ -101,6 +104,11 @@ class Realsense {
   int min_max_filter_size_;
   float min_max_filter_threshold_;
 
+  // color filtering options
+  bool enable_color_filter_;
+  hsv_color hsv_min_;
+  hsv_color hsv_max_;
+
   // camera calibrations
   rs::extrinsics color_camera_extrin_;
 
@@ -108,7 +116,8 @@ class Realsense {
   rs::intrinsics color_camera_intrin_;
 
   // realsense data;
-  cv::Mat color_image_;
+  cv::Mat rgb_color_image_;
+  cv::Mat hsv_color_image_;
   cv::Mat depth_image_;
 
   pcl::PointCloud<pcl::PointXYZRGB> pointcloud_color_;
@@ -125,6 +134,16 @@ constexpr bool kDefaultEnableDepthImage = false;
 
 constexpr bool kDefaultEnablePointcloudColor = true;
 constexpr bool kDefaultEnablePointcloudNoIntensity = false;
+
+// Filter point cloud by the points color
+constexpr bool kDefaultEnableColorFilter = false;
+// Minimum and maximum HSV values allowed by the color filter
+constexpr int kDefaultMinH = 0;
+constexpr int kDefaultMinS = 0;
+constexpr int kDefaultMinV = 0;
+constexpr int kDefaultMaxH = 255;
+constexpr int kDefaultMaxS = 255;
+constexpr int kDefaultMaxV = 255;
 
 // Rejects this number of frames between each processed one (no rejection =
 // 60hz)

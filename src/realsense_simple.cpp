@@ -26,7 +26,7 @@ void Realsense::streamToImage(cv::Mat* image, rs::stream stream) {
       readRawData<uint16_t>(image, stream, CV_16UC1);
       break;
     case rs::format::rgb8:
-      readRawData<color>(image, stream, CV_8UC3);
+      readRawData<rgb_color>(image, stream, CV_8UC3);
       break;
     case rs::format::y8:
       readRawData<uint8_t>(image, stream, CV_8UC1);
@@ -73,7 +73,9 @@ void Realsense::downSampleDepth() {
   }
 
   // return if there is no need for further down sampling
-  if (num_valid_samples <= target_number_of_samples_) {return;}
+  if (num_valid_samples <= target_number_of_samples_) {
+    return;
+  }
 
   double skip = static_cast<double>(num_valid_samples) /
                 (num_valid_samples - target_number_of_samples_);
@@ -96,6 +98,10 @@ void Realsense::buildNewPointcloud() {
     pointcloud_no_intensity_.clear();
   }
 
+  if (enable_color_filter_) {
+    cv::cvtColor(rgb_color_image_, hsv_color_image_, cv::COLOR_RGB2HSV);
+  } 
+
   for (size_t y_pixels = 0; y_pixels < depth_image_.rows; ++y_pixels) {
     for (size_t x_pixels = 0; x_pixels < depth_image_.cols; ++x_pixels) {
       rs::float2 depth_coord;
@@ -111,17 +117,32 @@ void Realsense::buildNewPointcloud() {
         rs::float3 point = depth_intrin_.deproject(depth_coord, z);
 
         if (enable_pointcloud_color_) {
-          color image_element;
+          rgb_color rgb_image_element;
           pcl::PointXYZRGB point_out;
-          if (getImageElementRef<color>(&image_element, color_camera_extrin_,
-                                        color_camera_intrin_, point,
-                                        color_image_)) {
+          if (getImageElementRef<rgb_color>(
+                  &rgb_image_element, color_camera_extrin_,
+                  color_camera_intrin_, point, rgb_color_image_)) {
+            if (enable_color_filter_) {
+              hsv_color hsv_image_element;
+              if (getImageElementRef<hsv_color>(
+                      &hsv_image_element, color_camera_extrin_,
+                      color_camera_intrin_, point, hsv_color_image_)) {
+                if ((hsv_image_element.h < hsv_min_.h) ||
+                    (hsv_image_element.s < hsv_min_.s) ||
+                    (hsv_image_element.v < hsv_min_.v) ||
+                    (hsv_image_element.h > hsv_max_.h) ||
+                    (hsv_image_element.s > hsv_max_.s) ||
+                    (hsv_image_element.v > hsv_max_.v)) {
+                  continue;
+                }
+              }
+            }
             point_out.x = point.x;
             point_out.y = point.y;
             point_out.z = point.z;
-            point_out.r = image_element.r;
-            point_out.g = image_element.g;
-            point_out.b = image_element.b;
+            point_out.r = rgb_image_element.r;
+            point_out.g = rgb_image_element.g;
+            point_out.b = rgb_image_element.b;
 
             pointcloud_color_.push_back(point_out);
           }
@@ -209,7 +230,8 @@ void Realsense::getCameraInfo(sensor_msgs::CameraInfo* camera_info,
 }
 
 void Realsense::setupCalibration() {
-  if (enable_color_camera_info_ || enable_pointcloud_color_) {
+  if (enable_color_camera_info_ || enable_pointcloud_color_ ||
+      enable_color_filter_) {
     color_camera_extrin_ =
         dev_->get_extrinsics(rs::stream::depth, rs::stream::color);
     color_camera_intrin_ = dev_->get_stream_intrinsics(rs::stream::color);
@@ -223,7 +245,7 @@ void Realsense::setupCalibration() {
 
 void Realsense::startDataStreams() {
   if (enable_color_image_ || enable_color_camera_info_ ||
-      enable_pointcloud_color_) {
+      enable_pointcloud_color_ || enable_color_filter_) {
     dev_->enable_stream(rs::stream::color, rs::preset::best_quality);
   }
   if (enable_depth_image_ || enable_pointcloud_color_ ||
@@ -251,7 +273,7 @@ void Realsense::sendRosMessages() {
 
   if (enable_color_image_) {
     sensor_msgs::ImagePtr color_image_msg =
-        cv_bridge::CvImage(std_msgs::Header(), "rgb8", color_image_)
+        cv_bridge::CvImage(std_msgs::Header(), "rgb8", rgb_color_image_)
             .toImageMsg();
     color_image_msg->header.frame_id = "realsense/color_camera";
     color_image_msg->header.stamp = ros::Time::now();
@@ -284,6 +306,21 @@ void Realsense::setupRos() {
   private_nh_.param("enable_pointcloud_no_intensity_",
                     enable_pointcloud_no_intensity_,
                     kDefaultEnablePointcloudNoIntensity);
+
+  private_nh_.param("enable_color_filter", enable_color_filter_, kDefaultEnableColorFilter);
+  int temp;
+  private_nh_.param("min_h", temp, kDefaultMinH);
+  hsv_min_.h = temp;
+  private_nh_.param("min_s", temp, kDefaultMinS);
+  hsv_min_.s = temp;
+  private_nh_.param("min_v", temp, kDefaultMinV);
+  hsv_min_.v = temp;
+  private_nh_.param("max_h", temp, kDefaultMaxH);
+  hsv_max_.h = temp;
+  private_nh_.param("max_s", temp, kDefaultMaxS);
+  hsv_max_.s = temp;
+  private_nh_.param("max_v", temp, kDefaultMaxV);
+  hsv_max_.v = temp;
 
   private_nh_.param("downsample_rate_factor", downsample_rate_factor_,
                     kDefaultDownsampleRateFactor);
@@ -352,14 +389,16 @@ Realsense::Realsense(int argc, char* argv[])
 }
 
 void Realsense::processData() {
-  if (enable_color_image_ || enable_pointcloud_color_) {
-    streamToImage(&color_image_, rs::stream::color);
+  if (enable_color_image_ || enable_pointcloud_color_ || enable_color_filter_) {
+    streamToImage(&rgb_color_image_, rs::stream::color);
   }
   if (enable_depth_image_ || enable_pointcloud_color_ ||
       enable_pointcloud_no_intensity_) {
     streamToImage(&depth_image_, rs::stream::depth);
     filterDepth();
-    if (target_number_of_samples_ > 0) {downSampleDepth();}
+    if (target_number_of_samples_ > 0) {
+      downSampleDepth();
+    }
   }
 
   if (enable_pointcloud_color_ || enable_pointcloud_no_intensity_) {
@@ -376,9 +415,7 @@ void Realsense::processData() {
   ros::spinOnce();
 }
 
-bool Realsense::ok(){
-  return !ros::isShuttingDown();
-}
+bool Realsense::ok() { return !ros::isShuttingDown(); }
 
 int main(int argc, char* argv[]) {
   try {
